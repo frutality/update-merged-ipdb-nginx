@@ -1,0 +1,42 @@
+name: Build suspicious IP list
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC ежедневно (апстрим Merged-IP-Data обновляется в 01:00 UTC)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mmdblookup
+        run: sudo apt-get update && sudo apt-get install -y mmdb-bin
+
+      - name: Install mmdbctl
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo ipinfo/mmdbctl --pattern '*linux_amd64.tar.gz'
+          tar xzf mmdbctl_*_linux_amd64.tar.gz
+          sudo mv mmdbctl_1.4.10_linux_amd64 /usr/local/bin/mmdbctl
+
+      - name: Build suspicious_ranges.conf
+        run: bash build.sh suspicious_ranges.conf
+
+      - name: Checksum
+        run: sha256sum suspicious_ranges.conf > suspicious_ranges.conf.sha256
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-build
+          name: "Latest build"
+          body: "Автособрано ${{ github.run_id }} из NetworkCats/Merged-IP-Data. Не редактировать руками."
+          files: |
+            suspicious_ranges.conf
+            suspicious_ranges.conf.sha256
