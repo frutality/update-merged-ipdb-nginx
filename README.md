@@ -12,7 +12,7 @@
 ## Как это работает
 
 ```
-┌─────────────────────┐   раз в сутки, 02:00 UTC
+┌──────────────────────┐   раз в сутки, 02:00 UTC
 │  GitHub Actions      │   (build.yml, cron + workflow_dispatch)
 │                      │
 │  build.sh:           │
@@ -34,9 +34,9 @@
 │  nginx edge #1, #2   │   fetch-latest.sh (независимо на каждом сервере):
 │  (два независимых    │   1. curl conf + sha256
 │   сервера, разные IP)│   2. проверка checksum
-│                       │   3. sanity-check формата/объёма файла
-│                       │   4. атомарная замена + backup предыдущей версии
-│                       │   5. nginx -t → reload, при ошибке - автооткат
+│                      │   3. sanity-check формата/объёма файла
+│                      │   4. атомарная замена + backup предыдущей версии
+│                      │   5. nginx -t → reload, при ошибке - автооткат
 └──────────────────────┘
 ```
 
@@ -66,7 +66,6 @@
 
 Подключение в nginx:
 ```nginx
-
 # http
 geo $suspicious_ip {
     default 0;
@@ -80,7 +79,7 @@ map $suspicious_ip $susp_key {
 }
 
 # http
-limit_req_zone $susp_key zone=suspicious_shared:10m rate=5r/s;
+limit_req_zone $susp_key zone=suspicious_shared:1m rate=5r/s;
 
 # server
 limit_req zone=suspicious_shared burst=5 nodelay;
@@ -88,21 +87,20 @@ limit_req zone=suspicious_shared burst=5 nodelay;
 
 ## Первичная настройка
 
-1. Запустить workflow вручную (`workflow_dispatch` в вкладке Actions) и убедиться, что
+1. Запустить workflow вручную (`workflow_dispatch` во вкладке Actions) и убедиться, что
    релиз `latest-build` создался с обоими файлами.
-2. Прогнать `fetch-latest.sh` руками на каждом edge-сервере, проверить `nginx -t` и лог
+2. Внести правки конфига `nginx`, описанные выше
+3. Прогнать `fetch-latest.sh` руками на каждом edge-сервере, проверить `nginx -t` и лог
    (`journalctl -t fetch-merged-ipdb`).
-3. Добавить в крон на обоих edge-серверах:
+4. Добавить в крон на обоих edge-серверах (от root):
    ```cron
-   0 3 * * * root /usr/local/bin/fetch-latest.sh
+   13 3 * * * /bin/bash /home/web/fetch-latest-ipdb.sh
    ```
 
 ## Эксплуатация / диагностика
 
 - Логи сборки — вкладка Actions в GitHub (или `gh run list` / `gh run view`).
 - Логи на edge — `journalctl -t fetch-merged-ipdb` (дублируется в stderr при ручном запуске).
-- Логи старого локального скрипта загрузки mmdb (если используется отдельно) —
-  `journalctl -t update-merged-ipdb`.
 - Ручной повторный запуск сборки: вкладка Actions → Run workflow, либо `gh workflow run build.yml`.
 - Проверить, что nginx реально видит новый список:
   ```bash
@@ -121,9 +119,40 @@ limit_req zone=suspicious_shared burst=5 nodelay;
   `Merged-IP-Data`) поменял схему CSV. Смотреть реальные колонки в тексте ошибки, поправить
   `NET_COL`/`JSON_COL` в `build.sh`.
 
+## Замер RAM и latency перед боевым включением
+
+Используется core-модуль `geo` (не `geoip2`) — весь список парсится **синхронно при
+`nginx -t`/reload** в память конфиг-пула мастер-процесса, а не лениво по mmap. Отсюда два
+специфичных для `geo` момента, которые стоит замерить перед тем, как полагаться на это в проде:
+
+1. **Стоимость парсинга при reload**:
+   ```bash
+   time nginx -t
+   time nginx -s reload
+   ```
+   `fetch-latest.sh` дёргает reload раз в сутки — если цифра большая, это ежедневная пауза
+   мастер-процесса, о которой нужно знать заранее.
+
+2. **RAM через `Pss`**:
+   ```bash
+   for pid in $(pgrep -f 'nginx: worker'); do
+       grep -E '^(Rss|Pss):' /proc/$pid/smaps_rollup
+   done
+   ```
+
+3. **Latency** — A/B сравнение двух почти идентичных `location`, один с обращением к
+   `$suspicious_ip` (или тестовой копии geo-блока на `$http_x_test_ip`, чтобы варьировать
+   источник без реальных разных IP), другой без:
+   ```bash
+   wrk -t4 -c100 -d30s --latency http://localhost/bench/without-geo
+   wrk -t4 -c100 -d30s --latency http://localhost/bench/with-geo -H "X-Test-IP: 1.0.0.0"
+   ```
+
+Результаты замера:
+- `nginx -t` / `nginx -s reload`: 0.25s → 0.47s
+- ΔPss (baseline → после reload → после 10 мин трафика): 72mb → 50mb → 55mb
+- Δlatency p50/p99 (without-geo vs with-geo): p50 (72.15ms → 71.98ms), p99 (100.24ms → 85.13ms)
+
 ## Известные ограничения / что не сделано
 
 - Нет автоочистки старых версий backup/prev-файлов на edge.
-- Нет замера RAM/latency-эффекта от подключения такого большого `geo`-списка (400-550k строк) —
-  перед боевым включением стоит явно прогнать `time nginx -t` и нагрузочный тест, список
-  заметно больше, чем изначально закладывалось.
