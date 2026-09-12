@@ -2,7 +2,7 @@ name: Build suspicious IP list
 
 on:
   schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC ежедневно (апстрим Merged-IP-Data обновляется в 01:00 UTC)
+    - cron: '17 2 * * *'   # 02:17 UTC ежедневно (апстрим Merged-IP-Data обновляется в 01:00 UTC)
   workflow_dispatch: {}
 
 permissions:
