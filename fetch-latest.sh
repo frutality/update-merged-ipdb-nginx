@@ -2,7 +2,7 @@
 # Запускается на nginx edge-серверах (крон). Единственная зависимость - curl + nginx.
 set -euo pipefail
 
-REPO="frutality/update-merged-ipdb"
+REPO="frutality/update-merged-ipdb-nginx"
 BASE_URL="https://github.com/$REPO/releases/download/latest-build"
 DEST="/etc/nginx/suspicious_ranges.conf"
 TMP="${DEST}.new"
@@ -34,9 +34,9 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
 fi
 
 # Sanity-check по форме и объёму файла - если апстрим/пайплайн сломался, не применяем мусор
-LINES=$(wc -l < "$TMP")
-if [ "$LINES" -lt 100000 ] || [ "$LINES" -gt 5000000 ]; then
-    log "suspicious line count ($LINES), aborting"
+LINE_COUNT=$(wc -l < "$TMP")
+if [ "$LINE_COUNT" -lt 100000 ] || [ "$LINE_COUNT" -gt 5000000 ]; then
+    log "suspicious line count ($LINE_COUNT), aborting"
     rm -f "$TMP" "$SHA_TMP"
     exit 1
 fi
@@ -65,4 +65,4 @@ if ! nginx -t; then
     exit 1
 fi
 nginx -s reload
-log "updated successfully: $LINES lines"
+log "updated successfully: $LINE_COUNT lines"
