@@ -20,10 +20,12 @@ jobs:
       - name: Install mmdbctl
         env:
           GH_TOKEN: ${{ github.token }}
+          MMDBCTL_VERSION: 1.5.1
         run: |
-          gh release download --repo ipinfo/mmdbctl --pattern '*linux_amd64.tar.gz'
-          tar xzf mmdbctl_*_linux_amd64.tar.gz
-          sudo mv mmdbctl_1.4.10_linux_amd64 /usr/local/bin/mmdbctl
+          gh release download "mmdbctl-${MMDBCTL_VERSION}" --repo ipinfo/mmdbctl \
+            --pattern "mmdbctl_${MMDBCTL_VERSION}_linux_amd64.tar.gz"
+          tar xzf "mmdbctl_${MMDBCTL_VERSION}_linux_amd64.tar.gz"
+          sudo mv "mmdbctl_${MMDBCTL_VERSION}_linux_amd64" /usr/local/bin/mmdbctl
 
       - name: Build suspicious_ranges.conf
         run: bash build.sh suspicious_ranges.conf
